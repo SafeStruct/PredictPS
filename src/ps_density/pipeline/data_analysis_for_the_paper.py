@@ -1,0 +1,1073 @@
+"""Reproduce paper figures from GeoTIFFs listed under the ``paper`` paths block."""
+
+# Import modules #
+import os
+import pathlib
+from datetime import datetime
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+from matplotlib.ticker import PercentFormatter
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
+from matplotlib.axes import Axes
+
+from PIL import Image
+
+import seaborn as sns
+
+import cartopy.crs as ccrs
+import cartopy.io.img_tiles as cimgt
+import cartopy.feature as cfeature
+
+from shapely.geometry import Polygon
+
+from ps_density.config.paths import load_paths
+from ps_density.prepare_data.prepare_coherence import main as prepare_coherence
+
+
+def ensure_seasonal_coherence(mosaic_path, season):
+    """Download and mosaic a season if the GeoTIFF (and cached .npy) are missing.
+
+    Uses ``prepare_data.prepare_coherence`` with the same ``prepare.aoi_*`` tiles
+    as training. Writes the mosaic to ``mosaic_path`` and tiles beside it.
+    """
+    mosaic_path = pathlib.Path(str(mosaic_path))
+    npy_path = pathlib.Path(str(mosaic_path).replace(".tif", ".npy"))
+    if mosaic_path.exists() or npy_path.exists():
+        return
+    print(
+        f"Missing {season} mosaic {mosaic_path}; "
+        "running prepare_coherence for that season"
+    )
+    prepare_coherence(season=season, output=mosaic_path)
+
+
+# needed to silence errors with big reading big rasters
+
+
+def main():
+    """Load paper rasters and write PNG figures to ``paper.plots_dir``."""
+    Image.MAX_IMAGE_PIXELS = None
+    pd.options.mode.chained_assignment = None
+
+    # Set global font parameters for the plots
+    font_params = {
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "DejaVu Serif", "Liberation Serif", "serif"],
+        "font.size": 12,
+    }
+    # Apply the global font parameters
+    plt.rcParams.update(font_params)
+
+
+    # Function definitions #
+
+
+    def fetch_data(raster_file, null_value=-9999) -> np.array:
+        # Code based on https://towardsdatascience.com/raster-data-scatter-plot-using-python-4bcdc8286769
+        """
+        The function reads a raster file, cleans it from null values, and returns a raveled raster.
+
+        Args:
+        raster_file (str): the path to the raster file
+        null_value (int): the null value in the raster
+
+        Returns:
+        np.array: the raveled raster
+
+        """
+
+        fname = raster_file
+        print(fname, 0)
+
+        im = Image.open(fname)
+        j = np.array(im)
+
+        def clean(x):
+            return np.nan if x <= null_value else x
+
+        cleann = np.vectorize(clean)
+        z = np.ravel(j)
+        y = cleann(z)
+        return y[~np.isnan(y)]
+
+
+    def load_data(raster_file) -> np.array:
+        """
+        This function loads the data from a raster file.
+        If the data has been loaded before, it is read from a .npy file.
+
+        Args:
+        raster_file (str): path to the GeoTIFF (from ``paper.input``)
+
+        Returns:
+        np.array: the data from the raster file
+
+        """
+
+        x_data_path = str(raster_file)
+        np_arr_path = x_data_path.replace(".tif", ".npy")
+
+        if pathlib.Path(np_arr_path).exists():
+            x_data = np.load(np_arr_path)
+        else:
+            x_data = fetch_data(x_data_path)
+            np.save(np_arr_path, x_data)
+
+        return x_data
+
+
+    # Read data #
+    _cfg = load_paths()
+    paper_in = _cfg.paper.input
+
+    # Seasonal coherence mosaics (not the train/test tiles/ directory).
+    # Summer is normally produced in step 1; other seasons are fetched here
+    # with prepare_coherence if the mosaic is missing.
+    for season, attr in (
+        ("summer", "coherence_summer"),
+        ("spring", "coherence_spring"),
+        ("fall", "coherence_fall"),
+        ("winter", "coherence_winter"),
+    ):
+        ensure_seasonal_coherence(getattr(paper_in, attr), season)
+
+    x_data = load_data(paper_in.coherence_summer)
+    x1_data = load_data(paper_in.coherence_spring)
+    x2_data = load_data(paper_in.coherence_fall)
+    x3_data = load_data(paper_in.coherence_winter)
+
+    y_data = load_data(paper_in.mask_egms)
+
+    z1_data = load_data(paper_in.ndvi_winter)
+    z2_data = load_data(paper_in.ndvi_summer)
+    z3_data = load_data(paper_in.ndvi_winter_std)
+    z4_data = load_data(paper_in.ndvi_summer_std)
+
+    mask_buil_data = load_data(paper_in.osm_buildings)
+    mask_rail_data = load_data(paper_in.osm_railway)
+    mask_highway_data = load_data(paper_in.osm_highway)
+    mask_moto_data = load_data(paper_in.osm_motorway)
+    mask_trunk_data = load_data(paper_in.osm_trunk)
+    mask_primary_data = load_data(paper_in.osm_primary)
+    mask_secondary_data = load_data(paper_in.osm_secondary)
+
+    infr_map = load_data(paper_in.osm)
+
+    pred_test_split = load_data(paper_in.pred_nl)
+
+    rome_gt = load_data(paper_in.rome_mask)
+    rome_pred = load_data(paper_in.pred_rome)
+
+
+    # Create dfs with input to analyse#
+    # Create df for Dutch data
+    d = {
+        "coh_mean": x_data,
+        "coh_mean_summer": x_data,
+        "coh_mean_spring": x1_data,
+        "coh_mean_fall": x2_data,
+        "coh_mean_winter": x3_data,
+        "nbpoints": y_data,
+        "ndvi_winter": z1_data,
+        "ndvi_summer": z2_data,
+        "std_ndvi_winter": z3_data,
+        "std_ndvi_summer": z4_data,
+        "mask_building": mask_buil_data,
+        "mask_railway": mask_rail_data,
+        "mask_highway": mask_highway_data,
+        "mask_motorway": mask_moto_data,
+        "mask_trunk": mask_trunk_data,
+        "mask_primary": mask_primary_data,
+        "mask_secondary": mask_secondary_data,
+        "infr_map": infr_map,
+        "pred_test": pred_test_split,
+    }
+    # for k, v in d.items():
+    #     print(k, len(v), getattr(v, "shape", None), getattr(v, "dtype", type(v)))
+    df = pd.DataFrame(data=d)
+
+    df["coh_mean"] = df["coh_mean"] / 1000
+    df["coh_mean_summer"] = df["coh_mean_summer"] / 1000
+    df["coh_mean_spring"] = df["coh_mean_spring"] / 1000
+    df["coh_mean_fall"] = df["coh_mean_fall"] / 1000
+    df["coh_mean_winter"] = df["coh_mean_winter"] / 1000
+
+    df["nbpoints"] = df["nbpoints"].astype("int")
+
+    # clear variables no longer needed
+    del (
+        d,
+        x_data,
+        x1_data,
+        x2_data,
+        x3_data,
+        y_data,
+        z1_data,
+        z2_data,
+        z3_data,
+        z4_data,
+        mask_buil_data,
+        mask_rail_data,
+        mask_highway_data,
+        mask_moto_data,
+        mask_trunk_data,
+        mask_primary_data,
+        mask_secondary_data,
+        infr_map,
+    )
+
+    # Create Rome df
+    d_Rome = {
+        "Rome_gt": rome_gt,
+        "Rome_pred": rome_pred,
+    }
+    df_Rome = pd.DataFrame(data=d_Rome)
+
+    # Published figures stay in paper.plots_dir (results_paper/). This run writes
+    # a sibling folder with a timestamp so those originals are not overwritten.
+    plots_base = pathlib.Path(str(_cfg.paper.plots_dir).rstrip("/\\"))
+    outputdir_plots = str(
+        plots_base.parent
+        / f"{plots_base.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
+    os.makedirs(outputdir_plots, exist_ok=True)
+    if not outputdir_plots.endswith(os.sep):
+        outputdir_plots += os.sep
+    print("Paper figures ->", outputdir_plots)
+
+
+    # Fig.4 - PS distribution #
+    bins = np.arange(0, 80, 1)
+    bins = np.append(bins, [300])
+
+    hist, bin_edges = np.histogram(df.nbpoints, bins)  # make the histogram
+    hist = hist / len(df) * 100
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    ax.bar(
+        range(len(hist)), hist, width=0.7, align="center", edgecolor="black", linewidth=0.4
+    )
+
+    ax.set_ylabel("Share of all pixels", fontsize=20)
+    ax.set_title(
+        "Distribution of PS density in the AoI",
+        fontsize=22,
+    )
+    ax.set_xlabel("# of PSs in a pixel (# of PSs in km$^2$)", fontsize=20)
+
+    # plt.grid(axis="y")
+    ax.yaxis.set_major_formatter(PercentFormatter(1))
+    plt.yticks([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+    ax.set_yticklabels(
+        ("0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"),
+        fontsize=18,
+    )
+
+    plt.xlim([-1, 82])
+    # plt.ylim([0, 2.5])
+
+    plt.xticks(np.arange(0, 81, 10), rotation=0)
+    ax.set_xticklabels(
+        (
+            "0 \n (0)",
+            "10 \n (1,950)",
+            "20 \n (3,900)",
+            "30 \n (5,850)",
+            "40 \n (7,800)",
+            "50 \n (9,750)",
+            "60 \n (11,700)",
+            "70 \n (13,650)",
+            "\u226580 \n (\u226515,600)",
+        ),
+        fontsize=18,
+    )
+    # ax.set_xticklabels(np.append(np.arange(0, 80, 10), ">80"), fontsize=18)
+
+
+    # Create an inset plot
+    axins: Axes = inset_axes(ax, width="60%", height="60%", loc="upper right", borderpad=3)
+
+    axins.bar(
+        range(len(hist)), hist, width=0.7, align="center", edgecolor="black", linewidth=0.4
+    )
+
+    # Set the y-axis for the inset plot
+    axins.yaxis.set_major_formatter(PercentFormatter(1))
+    axins.set_yticks([0, 0.5, 1, 1.5, 2, 2.5])
+    axins.set_yticklabels(("0%", "0.5%", "1%", "1.5%", "2%", "2.5%"), fontsize=18)
+
+    axins.set_xticks(np.arange(0, 81, 20))
+    axins.set_xticklabels(
+        (
+            "0 \n (0)",
+            "20 \n (3,900)",
+            "40 \n (7,800)",
+            "60 \n (11,700)",
+            "\u226580 \n (\u226515,600)",
+        ),
+        fontsize=18,
+    )
+
+    axins.set_xlim([-1, 70])
+    axins.set_ylim([0, 2.5])
+
+    # Mark the region corresponding to the inset axes on ax1 and draw lines
+    # in grey linking the two axes.
+    mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="r")
+
+    plt.savefig(
+        outputdir_plots + r"fig4a.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
+    # Fig.5  Coherence analysis #
+    # Fig.5 a/c/e #
+    # Define the seasons and their corresponding colors
+    seasons = ["spring", "summer", "fall", "winter"]
+    colors = ["#FFB000", "#FE6100", "#DC267F", "#785EF0"]
+
+    plot_setup_list = [
+        ["mask_building", "building", "5a"],
+        ["mask_railway", "railway", "5c"],
+        ["mask_highway", "road", "5e"],
+    ]
+
+    for i in range(0, 3):
+        plot_setup = plot_setup_list[i]
+        df_masked = df[(df[plot_setup[0]] == 1)]
+
+        bins = np.arange(0, 1.1, 0.1)
+
+        fig, ax = plt.subplots(figsize=[15, 5])
+        ax.tick_params(axis="both", which="major", labelsize=24)
+
+        # Initialize an empty list to store the histograms
+        hists = []
+
+        # Calculate the histogram for each season
+        for season in seasons:
+            hist, bin_edges = np.histogram(
+                df_masked["coh_mean_" + season],
+                bins,
+                weights=(np.ones(len(df_masked)) / len(df_masked)),
+            )
+            hists.append(hist)
+
+        # Calculate the left edge coordinates for the bars
+        left_edge_coords = [
+            list(map(lambda x: x - 0.4 + 0.2 * i, range(len(hist))))
+            for i, hist in enumerate(hists)
+        ]
+
+        # Plot the bars for each season
+        for i, season in enumerate(seasons):
+            ax.bar(
+                left_edge_coords[i],
+                hists[i],
+                width=0.2,
+                align="edge",
+                color=colors[i],
+                edgecolor="black",
+                linewidth=0.5,
+                label=season.capitalize(),
+            )
+
+        # Set the x-axis labels
+        plt.xticks(rotation=0, ha="center")
+        ax.set_xticks(np.arange(0, 10, 1))
+        ax.set_xticklabels(
+            [
+                f"({bins[i]:.2f} - \n {bins[i + 1]:.2f}]"
+                # "({:.2f} - \n {:.2f}]".format(bins[i], bins[i + 1])
+                for i, _ in enumerate(hist)
+            ]
+        )
+
+        plt.legend(loc="upper right", fontsize=20)
+
+        plt.ylim([0, 0.4])
+        ax.yaxis.set_major_formatter(PercentFormatter(1))
+
+        ax.set_title(
+            f"Seasonal variation in long-term coherence for {plot_setup[1]} pixels",
+            fontsize=24,
+        )
+        ax.set_xlabel("Long-term coherence bins", fontsize=22)
+        ax.set_ylabel("Share of considered pixels", fontsize=22)
+
+        plt.savefig(
+            f"{outputdir_plots}fig{plot_setup[2]}.png", dpi=300, bbox_inches="tight"
+        )
+        plt.close()
+
+
+    # Fig.5b/d/f #
+    # Define the seasons and their corresponding colors
+    seasons = ["summer", "winter"]
+    colors = ["#FE6100", "#785EF0"]
+
+    plot_setup_list = [
+        ["mask_building", "building", "5b"],
+        ["mask_railway", "railway", "5d"],
+        ["mask_highway", "road", "5f"],
+    ]
+
+    for i in range(0, 3):
+        plot_setup = plot_setup_list[i]
+
+        df_masked = df[(df[plot_setup[0]] == 1)]
+
+        bins = [
+            -1.0,
+            0,
+            1.00000000e-01,
+            2.00000000e-01,
+            3.00000000e-01,
+            4.00000000e-01,
+            5.00000000e-01,
+            6.00000000e-01,
+            7.00000000e-01,
+            8.00000000e-01,
+            9.00000000e-01,
+            1.00000000e00,
+        ]
+
+        fig, ax = plt.subplots(figsize=[15, 5])
+        ax.tick_params(axis="both", which="major", labelsize=24)
+
+        # Initialize an empty list to store the histograms
+        hists = []
+
+        # Calculate the histogram for each season
+        for season in seasons:
+            hist, bin_edges = np.histogram(
+                df_masked["ndvi_" + season],
+                bins,
+                weights=(np.ones(len(df_masked)) / len(df_masked)),
+            )
+            hists.append(hist)
+
+        # Calculate the left edge coordinates for the bars
+        left_edge_coords = [
+            list(map(lambda x: x - 0.4 + 0.4 * i, range(len(hist))))
+            for i, hist in enumerate(hists)
+        ]
+
+        # Plot the bars for each season
+        for i, season in enumerate(seasons):
+            ax.bar(
+                left_edge_coords[i],
+                hists[i],
+                width=0.4,
+                align="edge",
+                color=colors[i],
+                edgecolor="black",
+                linewidth=0.5,
+                label=season.capitalize(),
+            )
+
+        # Set the x-axis labels
+        plt.xticks(rotation=0, ha="center")
+        ax.set_xticks(np.arange(0, 11, 1))
+        ax.set_xticklabels(
+            [
+                "({:.1f} - \n {:.1f}]".format(bins[i], bins[i + 1])
+                for i, j in enumerate(hist)
+            ]
+        )
+
+        plt.legend(loc="upper right", fontsize=20)
+
+        plt.ylim([0, 0.4])
+
+        ax.yaxis.set_major_formatter(PercentFormatter(1))
+
+        ax.set_title(
+            "Seasonal variation in NDVI for {} pixels".format(plot_setup[1]), fontsize=24
+        )
+        ax.set_xlabel("NDVI bins", fontsize=22)
+        ax.set_ylabel("Share of considered pixels", fontsize=22)
+
+        plt.savefig(
+            outputdir_plots + r"fig{}.png".format(plot_setup[2]),
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+
+    # Print share of pixels with no data to check if this is something that should be considered
+    print(
+        "percent of winter pixels with nan in ndvi:",
+        (len(df_masked[df_masked["ndvi_winter"] == -9]) / len(df_masked)) * 100,
+    )
+    print(
+        "percent of summer pixels with nan in ndvi:",
+        (len(df_masked[df_masked["ndvi_summer"] == -9]) / len(df_masked)) * 100,
+    )
+    print(
+        "percent of pixels were both winter and summer with nan in ndvi:",
+        (
+            len(
+                df_masked[
+                    (df_masked["ndvi_winter"] == -9) & (df_masked["ndvi_summer"] == -9)
+                ]
+            )
+            / len(df_masked)
+        )
+        * 100,
+    )
+    print(
+        "percent of pixels were either winter or summer with nan in ndvi:",
+        (
+            len(
+                df_masked[
+                    (df_masked["ndvi_winter"] == -9) | (df_masked["ndvi_summer"] == -9)
+                ]
+            )
+            / len(df_masked)
+        )
+        * 100,
+    )
+
+
+    # Fig.3 - Analysis of distribution of pixel with and without PSs #
+    # Nb pts analysis
+    # At least 1 PS per OSM category
+
+    # Create column to indicate if there are any PSs in a pixel
+    df["nbpoints_01"] = 0
+    df["nbpoints_01"][df.nbpoints > 0] = 1
+
+    # Set bins
+    bins = [0, 1, 2]
+
+    # Create subsets for each OSM category
+    df_subset_b = df[df["mask_building"] > 0]
+    df_subset_r = df[df["mask_railway"] > 0]
+    df_subset_h = df[df["mask_highway"] > 0]
+    df_subset_m = df[df["mask_motorway"] > 0]
+    df_subset_t = df[df["mask_trunk"] > 0]
+    df_subset_p = df[df["mask_primary"] > 0]
+    df_subset_s = df[df["mask_secondary"] > 0]
+
+    # Plot the histograms
+    fig, ax = plt.subplots(figsize=(10, 7))
+    values, bins, bars = plt.hist(
+        [
+            df_subset_b.nbpoints_01,
+            df_subset_r.nbpoints_01,
+            df_subset_m.nbpoints_01,
+            df_subset_t.nbpoints_01,
+            df_subset_p.nbpoints_01,
+            df_subset_s.nbpoints_01,
+        ],
+        bins,
+        label=[
+            "Buildings",
+            "Railways",
+            "Motorways",
+            "Trunk roads",
+            "Primary roads",
+            "Secondary roads",
+        ],
+        edgecolor="black",
+        color=["#ffb000", "#fe6100", "#dc267f", "#648fff", "#785ef0", "#785ef0"],
+        linewidth=0.5,
+        weights=[
+            np.ones(len(df_subset_b)) / len(df_subset_b),
+            np.ones(len(df_subset_r)) / len(df_subset_r),
+            np.ones(len(df_subset_m)) / len(df_subset_m),
+            np.ones(len(df_subset_t)) / len(df_subset_t),
+            np.ones(len(df_subset_p)) / len(df_subset_p),
+            np.ones(len(df_subset_s)) / len(df_subset_s),
+        ],
+        rwidth=0.5,
+    )
+
+    # Add hatch to differentiate between primary and secondary roads
+    building_patch = bars[5][0]  # Access the first patch in the first bar
+    building_patch.set_hatch(".")
+    building_patch = bars[5][1]  # Access the first patch in the first bar
+    building_patch.set_hatch(".")
+
+    # Set the x-axis labels
+    plt.xticks([0.5, 1.5])
+    ax.set_xticklabels(("0", "at least 1"), fontsize=18)
+
+    # Set the y-axis labels
+    plt.ylim([0, 1])
+    plt.grid(axis="y")
+    ax.yaxis.set_major_formatter(PercentFormatter(1))
+    plt.yticks([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
+    ax.set_yticklabels(
+        ("0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%"),
+        fontsize=18,
+    )
+
+    # Add legend
+    plt.legend(loc="best", fontsize=18)
+
+    # Set titles
+    ax.set_title(
+        "Distribuiton of pixels with and without PSs \n depending on infrastructure type",
+        fontsize=22,
+    )
+    ax.set_xlabel("# of PSs in a pixel", fontsize=20)
+    ax.set_ylabel("Share of considered pixels", fontsize=20)
+
+
+    plt.savefig(
+        outputdir_plots + r"fig3a.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+    # Print values for each category
+    print("Share of pixels with and without PSs by OSM category", values)
+
+
+    # Fig.7 (all pixels) and Fig.11 (per OSM category) — prediction errors on test set #
+
+    # Calculate difference between ground truth and prediction
+    df["diff_pred"] = df.nbpoints - df.pred_test
+    # Select only pixels with a prediction as those are belonging to the test sets
+    df_test = df[df.pred_test < 255]
+
+    # Set-up contants for plotting
+    OSM_cat = [None, "building", "railway", "motorway", "trunk", "primary", "secondary"]
+    OSM_cat_label_list = [
+        "all",
+        "building",
+        "railway",
+        "motorway",
+        "trunk road",
+        "primary road",
+        "secondary road",
+    ]
+    color_list = ["blue", "#ffb000", "#fe6100", "#dc267f", "#648fff", "#785ef0", "#785ef0"]
+    plot_label_list = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n"]
+
+    # Generate plots for each OSM category
+    for i, category in enumerate(OSM_cat):
+
+        # Set-up the subset of the data and some plot settings
+        if category is None:
+            hatch = None
+            df_subset = df_test
+            # Rename the category
+            category = "all"
+        elif category == "secondary":
+            hatch = ["."]
+            # df_subset = df_test[df_test["mask_{}".format(category)] == 1]
+            df_subset = df_test[df_test[f"mask_{category}"] == 1]
+        else:
+            hatch = None
+            # df_subset = df_test[df_test["mask_{}".format(category)] == 1]
+            df_subset = df_test[df_test[f"mask_{category}"] == 1]
+
+        # Print MAE for each category
+        print(
+            "MAE per category - {}: {:.3f}".format(
+                category, np.mean(np.abs(df_subset.diff_pred))
+            )
+        )
+
+        # Plot the histogram for the prediction errors
+        # Set-up labels for file name and plot title
+        plot_label = plot_label_list[i * 2]
+        OSM_cat_label = OSM_cat_label_list[i]
+
+        # Set-up bins for plotting the histogram
+        bins = [-1000, -25, -15, -10, -5, -1, 2, 6, 11, 16, 26, 1000]
+
+        # Set-up labels for the bins
+        bin_cat = (
+            " over -25 \n (over -4,875)",
+            "-25 to -16 \n (-4,875 to -3,120)",
+            "-15 to -11 \n (-2,925 to -2,145)",
+            "-10 to -6 \n (-1,950 to -1,170)",
+            "-5 to -2 \n (-975 to -390)",
+            "-1 to 1 \n (-195 to 195)",
+            "2 to 5 \n (390 to 975)",
+            "6 to 10 \n (1,170 to 1,950)",
+            "11 to 15 \n (2,145 to 2,925)",
+            "16 to 25 \n (3,120 to 4,875)",
+            "over 25 \n (over 4,875)",
+        )
+
+        # Calculate the histogram for the prediction errors
+        bar_heights = {
+            "diff": np.histogram(df_subset.diff_pred, bins)[0] / len(df_subset),
+        }
+
+        # Set location of labels, width of the bars and initiate a multiplier
+        x = np.arange(len(bin_cat))  # the label locations
+        width = 0.5  # the width of the bars
+        multiplier = 0
+
+        # Generate plots
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        for attribute, measurement in bar_heights.items():
+            offset = 0
+            rects = ax.bar(
+                x + offset,
+                measurement,
+                width,
+                label=attribute,
+                color=color_list[i],
+                hatch=hatch,
+            )
+            multiplier += 1
+
+        # Format axes and titles
+        ax.set_xticks(x)
+        ax.set_xticklabels(bin_cat, rotation=90, fontsize=25)
+        plt.xlabel("Prediction error", fontsize=27)
+        plt.xlabel("Prediction error in number of PSs (in PSs in a km$^{2}$)", fontsize=27)
+
+        plt.grid(axis="y", linestyle="--", alpha=0.4)
+        ax.yaxis.set_major_formatter(PercentFormatter(1))
+        ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+        ax.set_yticklabels(("0%", "20%", "40%", "60%", "80%", "100%"), fontsize=25)
+        ax.set_ylabel("Share of considered pixels", fontsize=27)
+
+        ax.set_title(
+            "Prediction error distribution \n for {} pixels".format(OSM_cat_label),
+            fontsize=30,
+        )
+
+        if i == 0:
+            error_fig_name = "fig7{}.png".format(plot_label_list[i * 2])
+        else:
+            error_fig_name = "fig11{}.png".format(
+                chr(ord("a") + (i - 1) * 2)
+            )
+        plt.savefig(
+            outputdir_plots + error_fig_name,
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+        # Plot the box plot for the prediction errors
+        # Set-up labels for file name and plot title
+        plot_label = plot_label_list[i * 2 + 1]
+        OSM_cat_label = OSM_cat_label_list[i]
+
+        # Define the bin edges for the box plot
+        bin_edges = [0, 5, 10, 15, 20, 30, 40, 300]
+
+        # Create a new column for the bin labels
+        df_subset["nbpoints_bins"] = pd.cut(
+            df_subset["nbpoints"], bins=bin_edges, right=False
+        )
+
+        # Generate plots
+        plt.figure(figsize=(12, 6))
+        sns.boxplot(x="nbpoints_bins", y="diff_pred", data=df_subset, color=color_list[i])
+
+        ax = plt.gca()
+        for i, artist in enumerate(ax.artists):
+            # Set the hatching pattern
+            artist.set_hatch(hatch)
+            # Set the edge color to match the face color
+            artist.set_edgecolor("black")
+
+        # Set the x-ticks
+        ax.set_xticks(range(7))
+
+        # Set the x-tick labels
+        ax.set_xticklabels(
+            (
+                "[0,5)\n([0 - 975))",
+                "[5,10)\n([975 - 1,950))",
+                "[10,15)\n([1,950 - 2,925))",
+                "[15,20)\n([2,925 - 3,900))",
+                "[20,30)\n([3,900 - 5,850))",
+                "[30,40)\n([5,850 - 7,800))",
+                "40 and over\n(7,800 and over)",
+            ),
+            rotation=90,
+            fontsize=25,
+        )
+        plt.xlabel("# of PSs in a pixel (# of PSs in a km$^{2}$)", fontsize=27)
+
+        plt.ylim([-90, 90])
+        plt.grid(axis="y", linestyle="--", alpha=0.4)
+        plt.yticks([-75, -50, -25, 0, 25, 50, 75], fontsize=25)
+        plt.ylabel("Prediction error", fontsize=27)
+
+        ax.set_title(
+            "Prediction error by PS density \n for {} pixels".format(OSM_cat_label),
+            fontsize=30,
+        )
+
+        if i == 0:
+            error_fig_name = "fig7{}.png".format(plot_label_list[i * 2 + 1])
+        else:
+            error_fig_name = "fig11{}.png".format(
+                chr(ord("a") + (i - 1) * 2 + 1)
+            )
+        plt.savefig(
+            outputdir_plots + error_fig_name,
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+
+    # Fig. 8 - plot with location of AoI #
+    # Create a GeoDataFrame for the polygons
+    gdf = gpd.GeoDataFrame(columns=["geometry", "color", "edge", "alpha"])
+    gdf_tiles = gpd.GeoDataFrame(columns=["geometry", "color", "edge", "alpha"])
+    gdf_splits = gpd.GeoDataFrame(columns=["geometry", "color", "edge", "alpha"])
+    gdf_batch = gpd.GeoDataFrame(columns=["geometry", "color", "edge", "alpha"])
+
+
+    # Create a Cartopy map
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"projection": ccrs.PlateCarree()})
+
+    # Add basemap
+    ax.add_feature(cfeature.BORDERS, color="gray")
+    ax.add_feature(cfeature.COASTLINE, color="gray")
+
+    # ax.stock_img()
+    ax.set_extent([12, 13, 41.5, 42.1])  # Adjust the extent based on your data
+
+    request = cimgt.OSM()
+    ax.add_image(request, 10, interpolation="spline36")
+
+    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", alpha=0.5)
+    gl.xlabel_style = {"size": 14}
+    gl.ylabel_style = {"size": 14}
+
+
+    # Plot AOI
+    minx = 12.1
+    maxx = 12.953332000009372
+    miny = 41.62333399999531
+    maxy = 42.05
+    lon_lat_list = [[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy]]
+    polygon_geom = Polygon(lon_lat_list)
+    gdf_tiles = pd.concat(
+        [
+            gdf_tiles,
+            gpd.GeoDataFrame(
+                {
+                    "geometry": [polygon_geom],
+                    "color": ["black"],
+                    "edge": ["red"],
+                    "alpha": 1,
+                    "linewidth": 2,
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    # Set the GeoDataFrame
+    gdf_tiles = gpd.GeoDataFrame(gdf_tiles, geometry="geometry")
+
+    # Plot the GeoDataFrame
+    gdf_tiles.plot(
+        ax=ax,
+        color="none",
+        edgecolor=gdf_tiles["edge"],
+        alpha=gdf_tiles["alpha"],
+        linewidth=gdf_tiles["linewidth"],
+    )
+
+
+    # Set axis labels
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+
+
+    plt.savefig(
+        outputdir_plots + r"fig8.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
+    # Fig.9 Rome vs test - nb of pxls with no PS #
+    # Define bins and categories
+    bins = [0, 5, 10, 15, 20, 30, 40, 1000]
+    bin_cat = (
+        "[0,5) \n ([0 - 975))",
+        "[5,10) \n ([975 - 1,950))",
+        "[10,15) \n ([1,950 - 2,925))",
+        "[15, 20) \n ([2,925 - 3,900))",
+        "[20, 30) \n ([3,900 - 5,850))",
+        "[30, 40) \n ([5,850 - 7,800))",
+        "over 40 \n (over 7,800)",
+    )
+
+    # Calculate bar heights for the test split and the generalisation trial
+    bar_heights = {
+        "Test split ": np.histogram(df_test.nbpoints, bins)[0] / len(df_test),
+        "Generalisation trial": np.histogram(df_Rome.Rome_gt, bins)[0] / len(df_Rome),
+    }
+
+    # Define bar properties
+    x = np.arange(len(bin_cat))  # the label locations
+    width = 0.2  # the width of the bars
+    multiplier = 0
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Add bars to the plot
+    colors = ["#018571", "#a6611a"]
+    for attribute, measurement, color in zip(
+        bar_heights.keys(), bar_heights.values(), colors
+    ):
+        offset = width * multiplier
+        rects = ax.bar(x + offset, measurement, width, label=attribute, color=color)
+        multiplier += 1
+
+    # Set labels and title
+    plt.xticks(x + width, rotation=90, fontsize=18)
+    ax.set_xticklabels(bin_cat, fontsize=18)
+    ax.set_xlabel("# of PSs in a pixel (# of PSs in km$^{2}$)", fontsize=20)
+
+    plt.grid(axis="y")
+    ax.yaxis.set_major_formatter(PercentFormatter(1))
+    plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+    ax.set_yticklabels(("0%", "20%", "40%", "60%", "80%", "100%"), fontsize=18)
+    ax.set_ylabel("Share of considered pixels", fontsize=20)
+
+    ax.legend(loc="best", fontsize=18)
+
+    plt.savefig(
+        outputdir_plots + r"fig9.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
+    # Fig.15 Scatter plot of displacement #
+    # Define plot settings
+    coordinates = [
+        (
+            (5.266666666, 5.319999999),
+            (52.37333333584, 52.42666666884),
+            [5.287, 5.319999999, 52.3734, 52.3734 + 0.017],
+            [5.29, 5.3, 5.31],
+            [52.38, 52.39],
+            0.4,
+            "fig15c.png",
+            "overestimation_2",
+            "clipped2.shp",
+            "underestimation.pkl",
+        ),
+        (
+            (4.979999996, 5.033333329),
+            (51.91333333, 51.966666663),
+            [4.991, 5.015, 51.924, 51.95],
+            [5.29, 5.3, 5.31],
+            [52.38, 52.39],
+            0.85,
+            "fig15d.png",
+            "overestimation_3",
+            "clipped.shp",
+            "overestimation.pkl",
+        ),
+    ]
+
+    for (
+        (min_lon, max_lon),
+        (min_lat, max_lat),
+        extent,
+        x_ticks,
+        y_ticks,
+        shrink,
+        output_file,
+        shp_folder,
+        shp_file,
+        pkl_file,
+    ) in coordinates:
+        # Define the paths
+        shapefile_path = os.path.join(
+            str(paper_in.egms_plots_dir), shp_folder, shp_file
+        )
+        pickle_path = os.path.join(str(paper_in.egms_plots_dir), pkl_file)
+
+        # Check if the pickle file exists
+        if os.path.exists(pickle_path):
+            # If it exists, read it
+            gdf = pd.read_pickle(pickle_path)
+        else:
+            # If it doesn't exist, create it
+            gdf = gpd.read_file(shapefile_path)
+            gdf.to_pickle(pickle_path)
+
+        # Explode MultiPoint geometries into individual points
+        gdf_exploded = gdf.explode(index_parts=True)
+
+        # Clip the GeoDataFrame
+        clipped_gdf = gdf_exploded.cx[min_lon:max_lon, min_lat:max_lat]
+
+        clipped_gdf.sort_values(by="vel", ascending=False, inplace=True)
+
+        # Create a Cartopy map
+        fig, ax = plt.subplots(
+            figsize=(10, 10), subplot_kw={"projection": ccrs.PlateCarree()}
+        )
+
+        ax.set_extent(extent)
+
+        request = cimgt.GoogleTiles(style="satellite")
+        ax.add_image(request, 15, interpolation="spline36")
+
+        scatter = ax.scatter(
+            clipped_gdf.geometry.x,
+            clipped_gdf.geometry.y,
+            c=clipped_gdf[
+                "vel"
+            ],  # Replace 'displacement_column' with the actual column name
+            cmap="RdYlBu",  # You can choose another colormap
+            marker="o",
+            edgecolors="k",  # Black edges for better visibility
+            linewidths=0.1,  # Width of the edges
+            s=5,  # Marker size
+            vmin=-15,
+            vmax=15,
+            zorder=2,
+        )
+
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, color="gray", alpha=0.5)
+        gl.xlabel_style = {"size": 14}
+        gl.ylabel_style = {"size": 14}
+        gl.top_labels = False
+        gl.right_labels = False
+
+        gl.xlocator = mticker.FixedLocator(x_ticks)
+        gl.ylocator = mticker.FixedLocator(y_ticks)
+
+        cbar = plt.colorbar(scatter, ax=ax, shrink=shrink)
+        cbar.set_label("Velocity [mm/year]", fontsize=16)
+        cbar.ax.tick_params(labelsize=15)
+
+        plt.savefig(
+            os.path.join(outputdir_plots, output_file),
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+
+if __name__ == "__main__":
+    main()
