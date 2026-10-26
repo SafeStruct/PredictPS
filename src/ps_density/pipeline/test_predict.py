@@ -263,7 +263,7 @@ def main():
     # Generate plots for paper
 
     # Read optical data
-    opt = RasterDatasetOptical_imgs(paths=str(_cfg.test.input.google_satellite_dir))
+    opt = RasterDatasetOptical_imgs(paths=str(_cfg.test.input.rgb_base_map_dir))
     print(opt)
 
     outputdir_plots = os.path.join(str(_cfg.test.output.plots_dir), plots_folder_name)
@@ -680,7 +680,7 @@ def main():
 
     # Plots for paper
     # Read optical data
-    opt_rome = RasterDatasetOptical_imgs(paths=str(_cfg.test.rome.google_satellite_dir))
+    opt_rome = RasterDatasetOptical_imgs(paths=str(_cfg.test.rome.rgb_base_map_dir))
     print(opt_rome)
 
     outputdir_plots_interf = os.path.join(

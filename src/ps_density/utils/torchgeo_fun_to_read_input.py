@@ -22,7 +22,10 @@ class RasterDataset_msks(RasterDataset):
 
 
 class RasterDatasetOptical_imgs(RasterDataset):
-    """RGB GeoTIFF used as map context in prediction review plots."""
+    """RGB GeoTIFF used as the basemap in prediction review plots.
+
+    Any true-colour raster is fine. It does not have to be Google imagery.
+    """
 
     filename_glob = "*.tif"
     is_image = True

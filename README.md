@@ -8,7 +8,7 @@ This repository contains code required to reproduce results for the paper:
 
 Malinowska, D., Milillo, P., Briggs, K., Reale, C., and Giardina, G. (2024). Coherence-Based Prediction of Multi-Temporal InSAR Measurement Availability for Infrastructure Monitoring. *IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing*, 17, 16392–16410. [https://doi.org/10.1109/JSTARS.2024.3449688](https://doi.org/10.1109/JSTARS.2024.3449688)
 
-Research data: Zenodo DOI to be added.
+Research data: [https://doi.org/10.5281/zenodo.23675827](https://doi.org/10.5281/zenodo.23675827)
 
 Code: [https://github.com/dominika-malinowska/PredictPS](https://github.com/dominika-malinowska/PredictPS)
 
@@ -18,7 +18,7 @@ See also [CITATION.cff](CITATION.cff).
 
 Input data, intermediate files, and outputs that reproduce the paper are published on Zenodo.
 
-**DOI:** to be added after the Zenodo deposit.
+**DOI:** [10.5281/zenodo.23675827](https://doi.org/10.5281/zenodo.23675827)
 
 Download and extract the archive, then set `data_root` to the extracted directory (see Configuration). Folder names match [`config/paths.example.yaml`](config/paths.example.yaml). Required file names are listed under Required inputs.
 
@@ -123,12 +123,16 @@ The Zenodo deposit includes `OSM_combined.tif`, the infrastructure raster used f
 | `test.input.coherence_summer`, `osm`, `mask_egms` | Same stack as training |
 | `test.checkpoint` | Local `.ckpt`, or empty to download from Hugging Face (`dominika-malinowska/ps_predictions`) |
 | `test.checkpoints.one_channel` | One-channel comparison checkpoint from Zenodo (not on Hugging Face) |
-| `test.input.google_satellite_dir` | RGB GeoTIFFs for review plots |
+| `test.input.rgb_base_map_dir` | RGB GeoTIFF for the review-plot basemap (not on Zenodo) |
 | `test.output.results_dir` | Netherlands test GeoTIFF |
 | `test.output.plots_dir` | Netherlands review JPEGs |
 | `test.rome.*` | Rome transfer rasters, `results_dir`, and `plots_dir` |
 
 With the 20 Netherlands tiles, seed 54321, and the paper checkpoint, the test loader has 97 batches and `test_MAE` is 1.193.
+
+**RGB basemap.** The left-hand panel of Figs 6, 12, 13, 14, and 15a–b reads every `*.tif` in `test.input.rgb_base_map_dir` (`input/rgb_base_map/`) and `test.rome.rgb_base_map_dir` (`input_Italy/rgb_base_map/`). Any true-colour GeoTIFF is fine. The first three bands are red, green, and blue, divided by 255. It does not have to be Google imagery. These rasters are not in the Zenodo archive. The published JPEGs are included, so those figures do not need to be redrawn. Test MAE and the prediction GeoTIFFs do not use this imagery.
+
+To redraw the panels, the Netherlands raster should cover 3–8°E, 50–54°N at about 48000 × 38400 pixels, and the Rome raster about 12.10–12.95°E, 41.62–42.05°N at about 8192 × 4096 pixels (about eight times finer than the 3-arcsecond grid). A Sentinel-2 true-colour composite matches this layout. If either folder is empty, step 5 stops when it reaches the review plots.
 
 ### Predict one 1×1 degree tile
 
@@ -216,7 +220,7 @@ Inspect the stack first in `src/ps_density/pipeline/notebooks/train.ipynb`. That
 
 **Step 5.** `pipeline.test_predict` — Netherlands test MAE, review plots, one-channel comparison, and Rome transfer.
 
-**Input:** `test.input.*`, paper checkpoint, Google RGB, Rome rasters. **Output:** `test.output.results_dir`, review plots in `test.output.plots_dir`, Rome GeoTIFFs in `test.rome.results_dir`, Rome plots in `test.rome.plots_dir`.
+**Input:** `test.input.*`, paper checkpoint, RGB basemap, Rome rasters. **Output:** `test.output.results_dir`, review plots in `test.output.plots_dir`, Rome GeoTIFFs in `test.rome.results_dir`, Rome plots in `test.rome.plots_dir`.
 
 ```bash
 poetry run python -m ps_density.pipeline.test_predict
@@ -299,7 +303,7 @@ These are imported by pipeline scripts; do not invoke them with `poetry run pyth
 | 2 | `prepare_data.prepare_osm` | `prepare.osm_pbf` | timestamped mosaic next to `train.input.osm` |
 | 3 | `prepare_data/prepare_egms.ipynb` | `prepare.egms_links_txt`, `prepare.egms_shp_dir` | filtered link list, merged shapefiles; QGIS writes `train.input.mask_egms` |
 | 4 | `pipeline.train` | `train.input.*` | checkpoints under `train.output.results_dir` |
-| 5 | `pipeline.test_predict` | `test.input.*`, checkpoint, Google RGB, `test.rome.*` | `results_test` / `results_test_rome` GeoTIFFs and plots |
+| 5 | `pipeline.test_predict` | `test.input.*`, checkpoint, RGB basemap, `test.rome.*` | `results_test` / `results_test_rome` GeoTIFFs and plots |
 | 6 | `pipeline.predict_region` | `predict.*`, OSM PBF, public coherence tile | `{lat}{lon}_PS_pred.tif` under `results_predict_region` |
 | 7 | `pipeline.data_analysis_for_the_paper` | `paper.input` GeoTIFFs | timestamped folder beside `paper.plots_dir` |
 
@@ -311,11 +315,11 @@ Step 7 (`pipeline.data_analysis_for_the_paper`) writes PNG files into a timestam
 
 Published review folders on Zenodo:
 
-- Netherlands 2-channel: `results_test/plots/test_pred_54321_20231214_2in/`
-- Netherlands 1-channel: `results_test/plots/test_pred_54321_20231218_1in/`
-- Rome: `results_test_rome/plots/test_pred_54321_20231218_1in/` (folder name is historical; the panels are the 2-channel model. A new run writes `review_Rome_2channel_*`)
+- Netherlands 2-channel: `results_test/plots/review_NL_2channel/`
+- Netherlands 1-channel: `results_test/plots/review_NL_1channel/`
+- Rome 2-channel: `results_test_rome/plots/review_Rome_2channel/`
 
-A new Step 5 run writes timestamped `review_NL_2channel_*`, `review_NL_1channel_*`, and `review_Rome_2channel_*` instead of those names.
+A new Step 5 run writes timestamped `review_NL_2channel_*`, `review_NL_1channel_*`, and `review_Rome_2channel_*` so those published folders are not overwritten.
 
 | Paper figure | Recreate? | Source |
 | --- | --- | --- |
@@ -342,21 +346,21 @@ Review-plot mapping (`model_pred_b{batch}_{patch}.jpg` → paper name). None of 
 
 | Paper file | Original JPEG | Published folder |
 | --- | --- | --- |
-| `fig6a.jpg` | `model_pred_b0_13.jpg` | `test_pred_54321_20231214_2in` |
-| `fig6b.jpg` | `model_pred_b2_6.jpg` | `test_pred_54321_20231214_2in` |
-| `fig6c.jpg` | `model_pred_b33_0.jpg` | `test_pred_54321_20231214_2in` |
-| `fig6d.jpg` | `model_pred_b49_0.jpg` | `test_pred_54321_20231214_2in` |
-| `fig12a.jpg` | `model_pred_b13_11.jpg` | Rome `test_pred_54321_20231218_1in` |
-| `fig12b.jpg` | `model_pred_b5_6.jpg` | Rome `test_pred_54321_20231218_1in` |
-| `fig13a_2in.jpg` | `model_pred_b49_8.jpg` | `test_pred_54321_20231214_2in` |
-| `fig13a_1in.jpg` | `model_pred_b49_8.jpg` | `test_pred_54321_20231218_1in` |
-| `fig13b_2in.jpg` | `model_pred_b2_15.jpg` | `test_pred_54321_20231214_2in` |
-| `fig13b_1in.jpg` | `model_pred_b2_15.jpg` | `test_pred_54321_20231218_1in` |
-| `fig14a.jpg` | `model_pred_b14_4.jpg` | `test_pred_54321_20231214_2in` |
-| `fig14b.jpg` | `model_pred_b4_11.jpg` | `test_pred_54321_20231214_2in` |
-| `fig14c.jpg` | `model_pred_b3_0.jpg` | `test_pred_54321_20231214_2in` |
-| `fig15a.jpg` | `model_pred_b47_15.jpg` | `test_pred_54321_20231214_2in` |
-| `fig15b.jpg` | `model_pred_b25_9.jpg` | `test_pred_54321_20231214_2in` |
+| `fig6a.jpg` | `model_pred_b0_13.jpg` | `review_NL_2channel` |
+| `fig6b.jpg` | `model_pred_b2_6.jpg` | `review_NL_2channel` |
+| `fig6c.jpg` | `model_pred_b33_0.jpg` | `review_NL_2channel` |
+| `fig6d.jpg` | `model_pred_b49_0.jpg` | `review_NL_2channel` |
+| `fig12a.jpg` | `model_pred_b13_11.jpg` | `review_Rome_2channel` |
+| `fig12b.jpg` | `model_pred_b5_6.jpg` | `review_Rome_2channel` |
+| `fig13a_2in.jpg` | `model_pred_b49_8.jpg` | `review_NL_2channel` |
+| `fig13a_1in.jpg` | `model_pred_b49_8.jpg` | `review_NL_1channel` |
+| `fig13b_2in.jpg` | `model_pred_b2_15.jpg` | `review_NL_2channel` |
+| `fig13b_1in.jpg` | `model_pred_b2_15.jpg` | `review_NL_1channel` |
+| `fig14a.jpg` | `model_pred_b14_4.jpg` | `review_NL_2channel` |
+| `fig14b.jpg` | `model_pred_b4_11.jpg` | `review_NL_2channel` |
+| `fig14c.jpg` | `model_pred_b3_0.jpg` | `review_NL_2channel` |
+| `fig15a.jpg` | `model_pred_b47_15.jpg` | `review_NL_2channel` |
+| `fig15b.jpg` | `model_pred_b25_9.jpg` | `review_NL_2channel` |
 
 ## External dependencies
 

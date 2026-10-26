@@ -545,7 +545,7 @@ def plot_input_pred_patch(
 
             # PLOT TITLES
             if plot_titles:
-                axs[0].set_title("Google Satellite", fontsize=22)
+                axs[0].set_title("RGB basemap", fontsize=22)
                 axs[1].set_title("Long-term coherence", fontsize=22)
                 axs[2].set_title("Infrastructure map", fontsize=22)
                 axs[3].set_title("PS density", fontsize=22)

@@ -60,7 +60,8 @@ test:
     coherence_summer: *nl_coh
     osm: *nl_osm
     mask_egms: *nl_mask
-    google_satellite_dir: "{data_root}/input/google_satellite"  # RGB context for review plots
+    # Any RGB GeoTIFF in this folder. Not on Zenodo. Used only as the left panel of review plots.
+    rgb_base_map_dir: "{data_root}/input/rgb_base_map"
   # Leave checkpoint null/empty to download the 2-channel paper model from Hugging Face
   # (dominika-malinowska/ps_predictions, seed_54321_20231214-203338.ckpt).
   # Set a local .ckpt (for example a training run) to override.
@@ -74,7 +75,7 @@ test:
     coherence_dir: "{data_root}/input_Italy/coh_Rome_cropped"
     osm_dir: "{data_root}/input_Italy/OSM_Rome_combined/Rome_combined.tif"
     mask_dir: "{data_root}/input_Italy/EGMS_mask_Rome/egms_point_density_Rome.tif"
-    google_satellite_dir: "{data_root}/input_Italy/Google_satellite_Rome"
+    rgb_base_map_dir: "{data_root}/input_Italy/rgb_base_map"
     results_dir: "{data_root}/results_test_rome"
     plots_dir: "{data_root}/results_test_rome/plots"
 

@@ -15,6 +15,9 @@ identifiers:
   - type: doi
     value: 10.1109/JSTARS.2024.3449688
     description: Paper DOI
+  - type: doi
+    value: 10.5281/zenodo.23675827
+    description: Research data DOI
 preferred-citation:
   type: article
   title: "Coherence-Based Prediction of Multi-Temporal InSAR Measurement Availability for Infrastructure Monitoring"
@@ -40,3 +43,27 @@ preferred-citation:
   volume: "17"
   pages: 16392-16410
   journal: IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing
+references:
+  - type: data
+    title: "Coherence-based prediction of multi-temporal InSAR measurement availability for infrastructure monitoring — research data"
+    authors:
+      - family-names: Malinowska
+        given-names: Dominika
+        orcid: https://orcid.org/0000-0003-3607-8267
+      - family-names: Milillo
+        given-names: Pietro
+        orcid: https://orcid.org/0000-0002-1171-3976
+      - family-names: Briggs
+        given-names: Kevin
+        orcid: https://orcid.org/0000-0003-1738-9692
+      - family-names: Reale
+        given-names: Cormac
+        orcid: https://orcid.org/0000-0001-9610-4389
+      - family-names: Giardina
+        given-names: Giorgia
+        orcid: https://orcid.org/0000-0002-5996-5830
+    doi: 10.5281/zenodo.23675827
+    url: https://doi.org/10.5281/zenodo.23675827
+    year: 2026
+    publisher:
+      name: Zenodo
